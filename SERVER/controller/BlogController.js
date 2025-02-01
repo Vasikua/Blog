@@ -22,27 +22,32 @@ export const addNewBlog = async (req, res) => {
     const currentDate = Date.now();
 
     const newlyCreateBlog = new blog({
-        title, description, date: currentDate
-    })
+        title, 
+        description, 
+        date: currentDate
+    });
+
+    let session;
 
     try {
-        await newlyCreateBlog.save();
+        session = await mongoose.startSession(); // ✅ Correctly start a session
+        session.startTransaction();
+
+        await newlyCreateBlog.save({ session }); // ✅ Pass session explicitly
+
+        await session.commitTransaction();
+        session.endSession(); // ✅ Always end the session
+
+        return res.status(201).json({ newlyCreateBlog }); // ✅ Use 201 for resource creation
     } catch (error) {
-        console.error("error",error)
+        if (session) {
+            await session.abortTransaction(); // ✅ Rollback if an error occurs
+            session.endSession();
+        }
+        console.error("Error adding blog:", error);
+        return res.status(500).json({ message: "Internal Server Error", error });
     }
-
-    try {
-        const session = mongoose.startSession();
-        session.startTransaction()
-        await newlyCreateBlog.save(session);
-         session.commitTransaction()
-    } catch (error) {
-        return res.status(500).json({message: error})
-    }
-
-    return res.status(200).json({ newlyCreateBlog });
-}
-
+};
 export const deleteBlog = async (req, res) => {
     const id = req.params.id;
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -62,20 +67,27 @@ export const deleteBlog = async (req, res) => {
 }
 
 export const updateBlog = async (req, res) => {
-    const id = req.params.id;
-    const { title, description } = req.body
-    let toUpdatedBlog;
+    const { id } = req.params;
+    const { title, description } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({ message: "Invalid blog ID" });
+    }
 
     try {
-        toUpdatedBlog = await blog.findByIdAndUpdate(id,{title, description});
+        const updatedBlog = await blog.findByIdAndUpdate(
+            id,
+            { title, description },
+            { new: true, runValidators: true } // ✅ Return updated document & validate input
+        );
 
+        if (!updatedBlog) {
+            return res.status(404).json({ message: "Blog not found" });
+        }
+
+        return res.status(200).json({ updatedBlog });
     } catch (error) {
-        return res.send(500).json({ message: "Somthing went wrong! please try  agin later" });
+        console.error("Update Error:", error);
+        return res.status(500).json({ message: "Something went wrong, please try again later" });
     }
-    if (! toUpdatedBlog) {
-        return res.status(500).json({ message: "Unable to update" });
-    }
-
-    return res.status(200).json({  toUpdatedBlog });
-}
-
+};
